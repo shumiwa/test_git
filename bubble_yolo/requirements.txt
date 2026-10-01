@@ -1,0 +1,5 @@
+ultralytics>=8.4.0   # provides YOLO26 (yolo26n/s/m/l/x.pt)
+opencv-python
+numpy
+pandas
+matplotlib

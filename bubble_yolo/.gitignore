@@ -1,0 +1,6 @@
+runs/
+*.pt
+__pycache__/
+results*/
+dataset/
+synthetic/
