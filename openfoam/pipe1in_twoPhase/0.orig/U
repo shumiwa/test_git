@@ -1,0 +1,52 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | 1" pipe, gas-liquid two-phase (VOF / interFoam)
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volVectorField;
+    location    "0";
+    object      U;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "$FOAM_CASE/system/caseParameters"
+
+dimensions      [0 1 -1 0 0 0 0];
+
+internalField   uniform ($UG 0 0);   // liquid layer set to UL by setFields
+
+boundaryField
+{
+    // Plug inflow of each phase; the volumetric flow rates impose the
+    // superficial velocities USL and USG on the nominal pipe area pi*D^2/4.
+    inletLiquid
+    {
+        type                flowRateInletVelocity;
+        volumetricFlowRate  #eval{ $USL*0.25*pi()*sqr($D) };
+        value               uniform ($UL 0 0);
+    }
+    inletGas
+    {
+        type                flowRateInletVelocity;
+        volumetricFlowRate  #eval{ $USG*0.25*pi()*sqr($D) };
+        value               uniform ($UG 0 0);
+    }
+    outlet
+    {
+        // value only seeds the initial outflow; it must match the inflow
+        type            pressureInletOutletVelocity;
+        value           uniform (#eval{ $USL + $USG } 0 0);
+    }
+    wall
+    {
+        type            noSlip;
+    }
+}
+
+// ************************************************************************* //

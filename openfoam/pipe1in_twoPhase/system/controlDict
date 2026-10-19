@@ -1,0 +1,192 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | 1" pipe, gas-liquid two-phase (VOF / interFoam)
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "caseParameters"
+
+application     interFoam;
+
+startFrom       latestTime;
+startTime       0;
+stopAt          endTime;
+endTime         3;              // ~6 liquid/gas flow-throughs at the default conditions
+
+deltaT          1e-5;
+writeControl    adjustable;
+writeInterval   0.05;
+purgeWrite      0;
+writeFormat     binary;
+writePrecision  8;
+writeCompression off;
+timeFormat      general;
+timePrecision   6;
+runTimeModifiable true;
+
+adjustTimeStep  yes;
+maxCo           0.5;
+maxAlphaCo      0.5;
+maxDeltaT       5e-4;
+
+// Common settings for the cross-section monitors below (not a function object)
+sectionDefaults
+{
+    type            surfaceFieldValue;
+    libs            ("libfieldFunctionObjects.so");
+    writeControl    timeStep;
+    writeInterval   5;
+    log             false;
+    writeFields     false;
+    regionType      sampledSurface;
+    operation       areaAverage;
+    fields          (alpha.water p);
+}
+
+sectionPlane
+{
+    type            cuttingPlane;
+    planeType       pointAndNormal;
+    interpolate     false;
+}
+
+functions
+{
+    // Area-averaged liquid holdup and pressure at cross-sections
+    // (pressure gradient from p differences between sections away from the inlet)
+    section_x005
+    {
+        $sectionDefaults;
+        name                x005;
+        sampledSurfaceDict
+        {
+            $sectionPlane;
+            pointAndNormalDict { point (#eval{0.05*$LbyD*$D} 0 0); normal (1 0 0); }
+        }
+    }
+    section_x025
+    {
+        $sectionDefaults;
+        name                x025;
+        sampledSurfaceDict
+        {
+            $sectionPlane;
+            pointAndNormalDict { point (#eval{0.25*$LbyD*$D} 0 0); normal (1 0 0); }
+        }
+    }
+    section_x050
+    {
+        $sectionDefaults;
+        name                x050;
+        sampledSurfaceDict
+        {
+            $sectionPlane;
+            pointAndNormalDict { point (#eval{0.50*$LbyD*$D} 0 0); normal (1 0 0); }
+        }
+    }
+    section_x075
+    {
+        $sectionDefaults;
+        name                x075;
+        sampledSurfaceDict
+        {
+            $sectionPlane;
+            pointAndNormalDict { point (#eval{0.75*$LbyD*$D} 0 0); normal (1 0 0); }
+        }
+    }
+    section_x095
+    {
+        $sectionDefaults;
+        name                x095;
+        sampledSurfaceDict
+        {
+            $sectionPlane;
+            pointAndNormalDict { point (#eval{0.95*$LbyD*$D} 0 0); normal (1 0 0); }
+        }
+    }
+
+    // Outlet averages
+    outletAverage
+    {
+        type            surfaceFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    timeStep;
+        writeInterval   5;
+        log             false;
+        writeFields     false;
+        regionType      patch;
+        name            outlet;
+        operation       areaAverage;
+        fields          (p p_rgh alpha.water);
+    }
+    // Liquid volume flow rate through the outlet: sum(alpha*phi)
+    outletLiquidFlux
+    {
+        type            surfaceFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    timeStep;
+        writeInterval   5;
+        log             false;
+        writeFields     false;
+        regionType      patch;
+        name            outlet;
+        operation       weightedSum;
+        weightField     phi;
+        fields          (alpha.water);
+    }
+
+    // Pipe-averaged holdup
+    holdupVolume
+    {
+        type            volFieldValue;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    timeStep;
+        writeInterval   5;
+        log             false;
+        writeFields     false;
+        regionType      all;
+        operation       volAverage;
+        fields          (alpha.water);
+    }
+
+    // Time traces at x/L = 0.5 and 0.9: near bottom (-0.4D), just above the
+    // inlet liquid level (+0.1D, sees every slug body) and near top (+0.4D)
+    // -> slug frequency, translational velocity, spectra
+    probes
+    {
+        type            probes;
+        libs            ("libsampling.so");
+        writeControl    timeStep;
+        writeInterval   1;
+        fields          (alpha.water p U);
+        probeLocations
+        (
+            (#eval{0.5*$LbyD*$D} 0 #eval{-0.4*$D})
+            (#eval{0.5*$LbyD*$D} 0 #eval{ ($hLbyD - 0.4)*$D})
+            (#eval{0.5*$LbyD*$D} 0 #eval{ 0.4*$D})
+            (#eval{0.9*$LbyD*$D} 0 #eval{-0.4*$D})
+            (#eval{0.9*$LbyD*$D} 0 #eval{ ($hLbyD - 0.4)*$D})
+            (#eval{0.9*$LbyD*$D} 0 #eval{ 0.4*$D})
+        );
+    }
+
+    yPlus
+    {
+        type            yPlus;
+        libs            ("libfieldFunctionObjects.so");
+        writeControl    writeTime;
+    }
+}
+
+// ************************************************************************* //

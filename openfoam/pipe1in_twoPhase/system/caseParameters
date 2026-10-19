@@ -1,0 +1,50 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | 1" pipe, gas-liquid two-phase (VOF / interFoam)
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      caseParameters;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Single place to set geometry, mesh density and flow conditions.
+// Included by blockMeshDict, setFieldsDict, controlDict and the 0/ fields.
+
+// --- Geometry --------------------------------------------------------------
+D           0.0254;     // pipe inner diameter [m]  (1" nominal; Sch 40 ID = 0.02664)
+LbyD        40;         // pipe length in diameters  (L = LbyD*D)
+
+// --- Mesh (O-grid) ---------------------------------------------------------
+nCore       12;         // cells across the core square (and per 90 deg of wall, top/bottom)
+nLow        6;          // cells across the core below the liquid level
+nUp         6;          // cells across the core above the liquid level
+                        // (keep nLow:nUp ~ (zI+0.2):(0.2-zI) when changing hLbyD)
+nRad        10;         // cells radially between core square and wall
+radGrading  0.3;        // radial expansion ratio (wall cell / core-side cell)
+nAx         400;        // cells along the pipe axis
+
+// --- Flow conditions (horizontal pipe, gravity in -z) ----------------------
+USL         0.5;        // superficial liquid velocity [m/s]
+USG         2.0;        // superficial gas velocity    [m/s]
+hLbyD       0.5;        // liquid height / D at the inlet (sets the inletLiquid/inletGas
+                        // split of the inlet face) and of the initial liquid layer.
+                        // Valid range 0.32 - 0.68 (the level must cross the core square).
+
+
+// --- Derived (do not edit) -------------------------------------------------
+// Liquid area fraction of a stratified layer of height hL and the matching
+// in-situ phase velocities; used for the initial field and inlet start values.
+thetaL      #eval{ 2*acos(1 - 2*$hLbyD) };
+alphaL      #eval{ ($thetaL - sin($thetaL))/(2*pi()) };
+UL          #eval{ $USL/$alphaL };
+UG          #eval{ $USG/(1 - $alphaL) };
+
+// ************************************************************************* //

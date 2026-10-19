@@ -1,0 +1,42 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | 1" pipe, gas-liquid two-phase (VOF / interFoam)
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      setFieldsDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Initial stratified liquid layer of height hLbyD*D along the whole pipe,
+// each phase moving at its in-situ velocity (UL, UG).
+
+#include "caseParameters"
+
+defaultFieldValues
+(
+    volScalarFieldValue alpha.water 0
+    volVectorFieldValue U ($UG 0 0)
+);
+
+regions
+(
+    boxToCell
+    {
+        box (-1 -1 -1) (#eval{2*$LbyD*$D} 1 #eval{($hLbyD - 0.5)*$D});
+        fieldValues
+        (
+            volScalarFieldValue alpha.water 1
+            volVectorFieldValue U ($UL 0 0)
+        );
+    }
+);
+
+// ************************************************************************* //

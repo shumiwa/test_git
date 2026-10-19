@@ -1,0 +1,179 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | 1" pipe, gas-liquid two-phase (VOF / interFoam)
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    location    "system";
+    object      blockMeshDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// O-grid: core square + 6 curved outer blocks, with a horizontal mesh line at
+// the inlet liquid level z = zI so that the inlet is split into the patches
+// inletLiquid (below) and inletGas (above).
+//
+// Vertices are written in units of D (pipe radius = 0.5) and scaled to metres.
+// Pipe axis = x, cross-section = y-z, gravity = -z.
+//
+//            11 ------------- 10          wall vertices: 6,7,8,9,10,11
+//           /  5 ---------- 4  \          core vertices: 0,1,2,3,4,5
+//          /   |    gas     |   \
+//         9 -- 3 ---------- 2 -- 8   <- z = zI   (liquid level)
+//          \   |  liquid    |   /
+//           \  0 ---------- 1  /
+//            6 ------------- 7
+
+#include "caseParameters"
+
+scale   $D;
+
+r       0.5;                            // pipe radius
+s       0.2;                            // half-width of the core square
+c       #eval{ 0.5*sqrt(0.5) };         // wall vertex at 45 deg
+zI      #eval{ $hLbyD - 0.5 };          // liquid level (must satisfy |zI| < s)
+w       #eval{ sqrt(0.25 - sqr($zI)) }; // wall vertex at the liquid level
+
+// Mid-points of the wall arcs either side of the liquid level
+tI      #eval{ atan2($zI, $w) };
+yLo     #eval{ 0.5*cos(0.5*($tI - 0.25*pi())) };
+zLo     #eval{ 0.5*sin(0.5*($tI - 0.25*pi())) };
+yUp     #eval{ 0.5*cos(0.5*($tI + 0.25*pi())) };
+zUp     #eval{ 0.5*sin(0.5*($tI + 0.25*pi())) };
+
+ms      #eval{ -$s };
+mc      #eval{ -$c };
+mr      #eval{ -$r };
+mw      #eval{ -$w };
+myLo    #eval{ -$yLo };
+myUp    #eval{ -$yUp };
+
+// Graded radial direction (wall -> core)
+gRad    #eval{ 1/$radGrading };
+
+vertices
+(
+    // x = 0
+    (0 $ms $ms)     // 0
+    (0 $s  $ms)     // 1
+    (0 $s  $zI)     // 2
+    (0 $ms $zI)     // 3
+    (0 $s  $s )     // 4
+    (0 $ms $s )     // 5
+    (0 $mc $mc)     // 6
+    (0 $c  $mc)     // 7
+    (0 $w  $zI)     // 8
+    (0 $mw $zI)     // 9
+    (0 $c  $c )     // 10
+    (0 $mc $c )     // 11
+
+    // x = L
+    ($LbyD $ms $ms) // 12
+    ($LbyD $s  $ms) // 13
+    ($LbyD $s  $zI) // 14
+    ($LbyD $ms $zI) // 15
+    ($LbyD $s  $s ) // 16
+    ($LbyD $ms $s ) // 17
+    ($LbyD $mc $mc) // 18
+    ($LbyD $c  $mc) // 19
+    ($LbyD $w  $zI) // 20
+    ($LbyD $mw $zI) // 21
+    ($LbyD $c  $c ) // 22
+    ($LbyD $mc $c ) // 23
+);
+
+blocks
+(
+    // liquid side
+    hex ( 0  1  2  3 12 13 14 15) ($nCore $nLow  $nAx) simpleGrading (1 1 1)     // core
+    hex ( 6  7  1  0 18 19 13 12) ($nCore $nRad  $nAx) simpleGrading (1 $gRad 1) // bottom
+    hex ( 7  8  2  1 19 20 14 13) ($nLow  $nRad  $nAx) simpleGrading (1 $gRad 1) // +y
+    hex ( 9  6  0  3 21 18 12 15) ($nLow  $nRad  $nAx) simpleGrading (1 $gRad 1) // -y
+
+    // gas side
+    hex ( 3  2  4  5 15 14 16 17) ($nCore $nUp   $nAx) simpleGrading (1 1 1)     // core
+    hex ( 8 10  4  2 20 22 16 14) ($nUp   $nRad  $nAx) simpleGrading (1 $gRad 1) // +y
+    hex (10 11  5  4 22 23 17 16) ($nCore $nRad  $nAx) simpleGrading (1 $gRad 1) // top
+    hex (11  9  3  5 23 21 15 17) ($nUp   $nRad  $nAx) simpleGrading (1 $gRad 1) // -y
+);
+
+edges
+(
+    arc  6  7 (0 0     $mr)
+    arc  7  8 (0 $yLo  $zLo)
+    arc  8 10 (0 $yUp  $zUp)
+    arc 10 11 (0 0     $r )
+    arc 11  9 (0 $myUp $zUp)
+    arc  9  6 (0 $myLo $zLo)
+
+    arc 18 19 ($LbyD 0     $mr)
+    arc 19 20 ($LbyD $yLo  $zLo)
+    arc 20 22 ($LbyD $yUp  $zUp)
+    arc 22 23 ($LbyD 0     $r )
+    arc 23 21 ($LbyD $myUp $zUp)
+    arc 21 18 ($LbyD $myLo $zLo)
+);
+
+boundary
+(
+    inletLiquid
+    {
+        type    patch;
+        inGroups (inlet);
+        faces
+        (
+            ( 0  3  2  1)
+            ( 6  0  1  7)
+            ( 7  1  2  8)
+            ( 9  3  0  6)
+        );
+    }
+    inletGas
+    {
+        type    patch;
+        inGroups (inlet);
+        faces
+        (
+            ( 3  5  4  2)
+            ( 8  2  4 10)
+            (10  4  5 11)
+            (11  5  3  9)
+        );
+    }
+    outlet
+    {
+        type    patch;
+        faces
+        (
+            (12 13 14 15)
+            (18 19 13 12)
+            (19 20 14 13)
+            (21 18 12 15)
+            (15 14 16 17)
+            (20 22 16 14)
+            (22 23 17 16)
+            (23 21 15 17)
+        );
+    }
+    wall
+    {
+        type    wall;
+        faces
+        (
+            ( 6  7 19 18)
+            ( 7  8 20 19)
+            ( 8 10 22 20)
+            (10 11 23 22)
+            (11  9 21 23)
+            ( 9  6 18 21)
+        );
+    }
+);
+
+// ************************************************************************* //

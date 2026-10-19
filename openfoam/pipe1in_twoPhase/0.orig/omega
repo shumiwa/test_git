@@ -1,0 +1,44 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+  =========                 |
+  \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox
+   \\    /   O peration     |
+    \\  /    A nd           | 1" pipe, gas-liquid two-phase (VOF / interFoam)
+     \\/     M anipulation  |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volScalarField;
+    location    "0";
+    object      omega;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+#include "$FOAM_CASE/system/caseParameters"
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   uniform 150;
+
+boundaryField
+{
+    "inlet.*"
+    {
+        type            turbulentMixingLengthFrequencyInlet;
+        mixingLength    #eval{0.07*$D};
+        value           $internalField;
+    }
+    outlet
+    {
+        type            inletOutlet;
+        inletValue      $internalField;
+        value           $internalField;
+    }
+    wall
+    {
+        type            omegaWallFunction;
+        value           $internalField;
+    }
+}
+
+// ************************************************************************* //
