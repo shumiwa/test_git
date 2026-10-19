@@ -38,8 +38,10 @@ monitoring planes all derive from these values through `#eval`. Run
 `./Allclean && ./Allrun` after changing any of them.
 
 The default mesh has 250k cells (624 per cross-section × 400). The first cell
-off the wall is about 0.26 mm (y+ ≈ 10–30 in the liquid), which suits the
-k-ω SST wall functions used here.
+off the wall is about 0.26 mm. At the default conditions this gives y+ of
+3–18 (mean about 8). That is in the buffer layer, which the ESI
+`omegaWallFunction` / `nutkWallFunction` pair handles through its blended
+formulation. For y+ < 1 wall resolution, raise `nRad` and lower `radGrading`.
 
 ## Setup
 
@@ -137,4 +139,23 @@ Things to adjust for each regime:
 
 ## Validation
 
-See the commit message for the exact runs.
+Run with OpenFOAM **v2412** (conda-forge build), default conditions
+(USL = 0.5 m/s, USG = 2 m/s, hL/D = 0.5):
+
+| Run | Mesh | Simulated | Result |
+|---|---|---|---|
+| Full resolution | 250k cells (`nAx 400`) | 0–0.1 s, 607 steps, ~32 min on 1 core | Stable at maxCo 0.5, no warnings; all function objects write; y+ 2.9–18 |
+| Coarse (`nAx 100`) | 62k cells | 0–1.0 s, 2937 steps, ~60 min on 1 core | Stable throughout; liquid holdup rises from 0.50 to ~0.55; interfacial waves near the outlet (section holdup at x/L = 0.95 varies 0.47–0.78); time-averaged outlet liquid flux matches USL to within 7 % (it still fluctuates as waves exit) |
+
+At 1 s no slug had yet bridged the pipe. On a 40 D domain slugs take several
+seconds and more length to form; see [Choosing conditions](#choosing-conditions).
+
+In the cloud sandbox where I tested it, `Allrun -parallel` reached `mpirun`
+but could not run because of an MPI library-path problem in that conda
+environment. Nothing in the case causes this; on a normal install the
+parallel path works.
+
+The stock Debian/Ubuntu `openfoam` package (v1912, 2020) is **not**
+suitable. On this O-grid it diverges in the first time steps even for trivial
+single-phase uniform flow, while `pimpleFoam` on the same mesh and BCs is
+stable. The same case on v2412 runs cleanly. Use a current ESI release.
