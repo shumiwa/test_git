@@ -1,0 +1,844 @@
+<title>Bubbly-to-Slug Transition</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: full-bleed WebGL viewport (a post-processing window), instrument overlays pinned to corners. Single dark look, chosen on purpose. */
+:root {
+  color-scheme: dark;
+  --bg: #06090f;
+  --panel: rgba(10, 15, 24, 0.74);
+  --panel-line: rgba(150, 180, 220, 0.16);
+  --fg: #e4ebf4;
+  --muted: #8b9bb0;
+  --accent: #8cc8ff;
+  --bubbly: #6aa7ff;
+  --trans: #f2b45a;
+  --slug: #ff7a5c;
+  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); overflow: hidden; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+.ui {
+  position: fixed; inset: 0; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: calc(env(safe-area-inset-top, 0px) + 14px) calc(env(safe-area-inset-bottom, 0px) + 14px);
+}
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.panel {
+  pointer-events: auto; background: var(--panel); border: 1px solid var(--panel-line);
+  border-radius: 6px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.titleblock { padding: 12px 14px; display: grid; gap: 10px; max-width: 30rem; min-width: 0; }
+.eyebrow { margin: 0; font-family: var(--font-data); font-size: 11px; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; }
+h1 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: clamp(20px, 2.4vw, 28px); line-height: 1.1; letter-spacing: 0.005em; text-wrap: balance; }
+h1 .arrow { color: var(--accent); font-weight: 500; }
+.stats { display: grid; grid-template-columns: repeat(5, auto); gap: 4px 16px; font-variant-numeric: tabular-nums; }
+.stat { display: grid; gap: 1px; min-width: 0; }
+.stat .k { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.stat .v { font-family: var(--font-data); font-size: 15px; font-weight: 500; }
+.regime { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chip {
+  font-family: var(--font-display); font-weight: 600; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid currentColor; color: var(--bubbly);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.regime .hint { font-size: 12px; color: var(--muted); }
+
+.legend { padding: 12px 14px; display: grid; gap: 8px; width: 15rem; max-width: 100%; }
+.legend .ttl { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+.legend .ttl b { color: var(--fg); font-family: var(--font-data); font-weight: 500; }
+#cbar { width: 100%; height: 12px; border-radius: 2px; display: block; }
+.ticks { display: flex; justify-content: space-between; font-family: var(--font-data); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.gline { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.gline .g { font-family: var(--font-data); color: var(--fg); }
+.swatches { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.swatches span { display: flex; align-items: center; gap: 8px; }
+.swatches i { width: 18px; height: 2px; display: inline-block; border-radius: 1px; }
+.swatches i.ball { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #9fb0c4 60%, #4a5868); }
+
+.controls { padding: 10px 12px; display: grid; gap: 10px; }
+.timeline { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; font-family: var(--font-data); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#tl { width: 100%; height: 14px; display: block; border-radius: 2px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.group > .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
+button {
+  font: 500 13px/1 var(--font-body); color: var(--fg); background: rgba(140, 170, 210, 0.08);
+  border: 1px solid var(--panel-line); border-radius: 4px; padding: 7px 10px; cursor: pointer;
+}
+button:hover { background: rgba(140, 170, 210, 0.16); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+button.primary { min-width: 5.2rem; }
+details { font-size: 12px; color: var(--muted); max-width: 70ch; }
+details summary { cursor: pointer; color: var(--fg); }
+details p { margin: 6px 0 0; line-height: 1.5; }
+.fade { position: fixed; inset: 0; background: var(--bg); opacity: 0; pointer-events: none; transition: opacity 0.5s; }
+.fade.on { opacity: 1; }
+
+@media (max-width: 720px) {
+  .stats { grid-template-columns: repeat(3, auto); }
+  .legend { width: 100%; }
+  .titleblock { max-width: 100%; }
+  .swatches { display: none; }
+}
+@media (max-width: 480px) {
+  .eyebrow, .regime .hint, .legend .frame-row, .gline, details { display: none; }
+  .titleblock, .legend { padding: 10px 12px; }
+  .stats { gap: 2px 12px; }
+  .group > .lbl { display: none; }
+  button { padding: 7px 8px; font-size: 12px; }
+}
+</style>
+
+<div id="stage"></div>
+<div class="fade" id="fade"></div>
+
+<div class="ui">
+  <div class="top">
+    <section class="panel titleblock" aria-label="Flow state">
+      <p class="eyebrow">Vertical air–water upflow · periodic pipe, L = 10D</p>
+      <h1>Bubbly <span class="arrow">→</span> slug transition</h1>
+      <div class="stats">
+        <div class="stat"><span class="k">t·U<sub>m</sub>/D</span><span class="v" id="sT">0.0</span></div>
+        <div class="stat"><span class="k">void fraction α</span><span class="v" id="sA">0.10</span></div>
+        <div class="stat"><span class="k">bubbles</span><span class="v" id="sN">0</span></div>
+        <div class="stat"><span class="k">d<sub>max</sub>/D</span><span class="v" id="sD">0.00</span></div>
+        <div class="stat"><span class="k">coalescences</span><span class="v" id="sC">0</span></div>
+      </div>
+      <div class="regime"><span class="chip" id="chip">Bubbly flow</span><span class="hint" id="hint">Small bubbles, wall-peaked</span></div>
+    </section>
+
+    <aside class="panel legend" aria-label="Legend">
+      <div class="ttl"><span>Liquid speed |u − U<sub>f</sub>| / U<sub>m</sub></span></div>
+      <canvas id="cbar" width="240" height="12"></canvas>
+      <div class="ticks"><span>0</span><span>0.5</span><span>1.0</span><span>1.5</span><span>2.0</span></div>
+      <div class="ttl frame-row"><span>Streamline frame</span><b id="frameName">Taylor bubble, U<sub>TB</sub></b></div>
+      <div class="gline"><span class="g" id="gArrow">g ←</span><span id="gText">Pipe drawn horizontal; flow is upward (→)</span></div>
+      <div class="swatches">
+        <span><i class="ball"></i>Gas–liquid interface</span>
+        <span><i style="background:linear-gradient(90deg,#3b4cc0,#dddddd,#b40426)"></i>Streamlines of the liquid</span>
+        <span><i style="background:linear-gradient(90deg,#26306a,#6b6b6b,#5a0213);height:6px"></i>Mid-plane slice, z = 0</span>
+      </div>
+    </aside>
+  </div>
+
+  <section class="panel controls" aria-label="Playback">
+    <div class="timeline"><span id="tNow">0.0</span><canvas id="tl" width="800" height="14" aria-label="Flow regime history"></canvas><span id="tEnd">23.0</span></div>
+    <div class="row">
+      <div class="group">
+        <button class="primary" id="bPlay" type="button">Pause</button>
+        <button id="bRestart" type="button">Restart</button>
+      </div>
+      <div class="group" role="group" aria-label="Speed">
+        <span class="lbl">Speed</span>
+        <button id="sp05" type="button" data-speed="0.5">0.5×</button>
+        <button id="sp1" type="button" data-speed="1" aria-pressed="true">1×</button>
+        <button id="sp2" type="button" data-speed="2">2×</button>
+      </div>
+      <div class="group" role="group" aria-label="Streamline frame">
+        <span class="lbl">Frame</span>
+        <button id="frLab" type="button" data-frame="0">Lab</button>
+        <button id="frMix" type="button" data-frame="1">U<sub>m</sub></button>
+        <button id="frTB" type="button" data-frame="1.6" aria-pressed="true">U<sub>TB</sub></button>
+      </div>
+      <div class="group" role="group" aria-label="Layers">
+        <span class="lbl">Show</span>
+        <button id="tgLines" type="button" aria-pressed="true">Streamlines</button>
+        <button id="tgSlice" type="button" aria-pressed="true">Slice</button>
+        <button id="tgPipe" type="button" aria-pressed="true">Pipe wall</button>
+        <button id="tgOrbit" type="button" aria-pressed="false">Orbit</button>
+      </div>
+    </div>
+    <details>
+      <summary>About this model</summary>
+      <p>This is a kinematic reconstruction rendered in the style of a DNS post-processing scene, not a Navier–Stokes solution. Bubbles are tracked as Lagrangian interfaces with size-dependent slip and lift (small bubbles migrate to the wall, large ones to the core), wake entrainment and coalescence. Gas is added until α ≈ 0.30, where the bubbly regime typically gives way to slug flow. Taylor bubbles rise at U<sub>TB</sub> = 1.2 U<sub>m</sub> + 0.35 √(gD) (Nicklin, 1962) and shed small bubbles from their tails. The liquid field combines a 1/7-power turbulent profile, divergence-free synthetic turbulence, potential-flow dipoles around dispersed bubbles, and an axisymmetric stream function for each Taylor bubble that carries the falling film and a toroidal wake vortex. Drag to rotate, scroll or pinch to zoom.</p>
+    </details>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+'use strict';
+const CAPTURE = /[?&]capture/.test(location.search);
+
+// ---------------- constants (lengths in R, velocity in U_m) ----------------
+const L = 20, HALF = L / 2, UM = 1, UMAX = UM * 60 / 49, UTB = 1.6, EPS = 0.06;
+const TEND = 56;           // loop length, simulation seconds (t·Um/D = 28)
+const BIG_RE = 0.2;        // equivalent radius above which a bubble gets its own mesh
+const PIPE_VOL = Math.PI * L;
+
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const wrap = (dx) => dx - L * Math.round(dx / L);
+const reOf = (V) => Math.cbrt(3 * V / (4 * Math.PI));
+
+// base turbulent profile u = Umax (1 - r)^(1/7), tabulated
+const UB_N = 512, UB = new Float32Array(UB_N + 1);
+for (let i = 0; i <= UB_N; i++) UB[i] = UMAX * Math.pow(1 - i / UB_N, 1 / 7);
+function ub(r) { if (r >= 1) return 0; const f = r * UB_N, i = f | 0, w = f - i; return UB[i] * (1 - w) + UB[i + 1] * w; }
+// Stokes stream function of base flow relative to a frame moving at UTB, as a function of m = r^2
+function psiF(m) {
+  if (m <= 0) return 0; if (m > 1) m = 1;
+  const s = 1 - Math.sqrt(m);
+  return UMAX * (0.875 * (1 - Math.pow(s, 8 / 7)) - (7 / 15) * (1 - Math.pow(s, 15 / 7))) - UTB * m * 0.5;
+}
+
+// divergence-free synthetic turbulence: u' = curl( (1-r^2)^2 * sum e_k sin(k.x - w t) )
+const modes = [];
+{
+  const tr = mulberry32(11);
+  for (let i = 0; i < 8; i++) {
+    const kx = (2 * Math.PI * (2 + Math.floor(tr() * 9)) / L) * (tr() < 0.5 ? 1 : -1);
+    const ky = (tr() * 2 - 1) * 3.2, kz = (tr() * 2 - 1) * 3.2;
+    let ex = tr() * 2 - 1, ey = tr() * 2 - 1, ez = tr() * 2 - 1; const en = Math.hypot(ex, ey, ez); ex /= en; ey /= en; ez /= en;
+    modes.push({ kx, ky, kz, ex, ey, ez, cx: ky * ez - kz * ey, cy: kz * ex - kx * ez, cz: kx * ey - ky * ex, om: -kx * 0.95 + (tr() * 2 - 1) * 0.7, ph: tr() * 6.283, amp: 0.03 });
+  }
+}
+function turb(x, y, z, t, o) {
+  const r2 = y * y + z * z; if (r2 >= 1) return;
+  const w = 1 - r2, damp = w * w, gy = -4 * w * y, gz = -4 * w * z;
+  for (let i = 0; i < modes.length; i++) {
+    const m = modes[i], th = m.kx * x + m.ky * y + m.kz * z + m.om * t + m.ph, c = Math.cos(th), s = Math.sin(th);
+    o.x += m.amp * (damp * c * m.cx + (gy * m.ez - gz * m.ey) * s);
+    o.y += m.amp * (damp * c * m.cy + gz * m.ex * s);
+    o.z += m.amp * (damp * c * m.cz - gy * m.ex * s);
+  }
+}
+
+// ---------------- bubble state ----------------
+let rng, T, smalls, bigs, coalCount, frameU = UTB, history;
+const NB = 50, BW = L / NB; let bins = [];
+for (let i = 0; i < NB; i++) bins.push([]);
+const binOf = (x) => clamp(Math.floor((x + HALF) / BW), 0, NB - 1);
+
+function newSmall(x, y, z, re, grow) {
+  return { x, y, z, re, V: 4 / 3 * Math.PI * re * re * re, vx: 1, vy: 0, vz: 0, wx: 0.2, wy: 0, wz: 0, ph: rng() * 6.283, grow, dead: false };
+}
+
+// ---- big-bubble shape: nose/tail semi-ellipsoids joined by a slightly tapered cylinder ----
+function shapeParams(b) {
+  const re = b.re, lam = clamp((re - 0.2) / 0.45, 0, 1);
+  const cn = 0.74 + 0.38 * lam, ct = 0.74 - 0.46 * lam;
+  let a = re * Math.cbrt(2 / (cn + ct)), body = 0;
+  const AMAX = 0.8;
+  if (a > AMAX) { a = AMAX; body = Math.max(0, (b.V - (2 / 3) * Math.PI * a * a * a * (cn + ct)) / (Math.PI * a * a)); }
+  b.a = a; b.n = cn * a; b.t = ct * a; b.body = body; b.len = b.n + b.t + body; b.lam = lam;
+  b.ad = 0.5 * (a + re);
+  b.taper = 0.05 * Math.min(1, body / a);
+  buildGTable(b);
+  b.shapeV = b.V;
+}
+function hProf(b, d) {
+  if (d <= 0 || d >= b.len) return 0;
+  const a = b.a, t = b.t, body = b.body;
+  if (d < t) { const s = (t - d) / t; return a * Math.sqrt(Math.max(0, 1 - s * s)); }
+  if (d < t + body) return a * (1 - b.taper * (d - t) / Math.max(body, 1e-6));
+  const s = (d - t - body) / b.n; return a * (1 - b.taper) * Math.sqrt(Math.max(0, 1 - s * s));
+}
+// smoothed squared radius g(x) used by the stream-function mapping of Taylor bubbles
+const GD = 0.02, GPAD = 0.6;
+function buildGTable(b) {
+  const x0 = -b.len / 2 - GPAD, n = Math.ceil((b.len + 2 * GPAD) / GD) + 1;
+  const raw = new Float32Array(n), out = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const h = hProf(b, x0 + i * GD + b.len / 2); raw[i] = h * h; }
+  const K = 15, sig = 5, ker = []; let ks = 0;
+  for (let k = -K; k <= K; k++) { const w = Math.exp(-(k * k) / (2 * sig * sig)); ker.push(w); ks += w; }
+  for (let i = 0; i < n; i++) { let s = 0; for (let k = -K; k <= K; k++) { const j = i + k; if (j >= 0 && j < n) s += raw[j] * ker[k + K]; } out[i] = s / ks; }
+  b.g = out; b.g0 = x0; b.gn = n;
+}
+function gAt(b, dx) {
+  const f = (dx - b.g0) / GD; if (f <= 0 || f >= b.gn - 1) return 0;
+  const i = f | 0, w = f - i; return b.g[i] * (1 - w) + b.g[i + 1] * w;
+}
+function psiT(b, dx, r, A) {
+  const r2 = r * r, g = gAt(b, dx), den = 1 - g, q = (r2 - g) / den;
+  let m = 0;
+  if (q > 0) { const e = EPS * Math.min(1, g / 0.04); m = e > 0 ? q * q / (q + e) * (1 + e) : q; }
+  let psi = psiF(m);
+  const xt = (dx + b.len / 2 + 0.75 * b.a) / 0.6;   // toroidal wake vortex behind the tail
+  if (xt > -3 && xt < 3 && r2 < 1) { const w1 = 1 - r2; psi += A * Math.exp(-xt * xt) * r2 * w1 * w1; }
+  return psi;
+}
+function wakeAmp(b, t) { return 0.48 * (1 + 0.22 * Math.sin(2.3 * t + b.ph)); }
+
+function insideBig(b, x, y, z, pad) {
+  const dx = wrap(x - b.x), d = dx + b.len / 2;
+  if (d < -pad || d > b.len + pad) return false;
+  const rho = Math.hypot(y - b.y, z - b.z);
+  const h = hProf(b, clamp(d, 1e-3, b.len - 1e-3));
+  if (pad === 0) return rho < hProf(b, d);
+  return rho < h + pad;
+}
+
+// ---------------- velocity field (lab frame) ----------------
+const tmp = { x: 0, y: 0, z: 0 };
+function addDipole(dx, dy, dz, a, Wx, Wy, Wz, wg, o) {
+  const d2 = dx * dx + dy * dy + dz * dz, a2 = a * a;
+  if (d2 < a2 || d2 > 16 * a2) return;
+  const d = Math.sqrt(d2), f = wg * a2 * a / (2 * d2 * d), nx = dx / d, ny = dy / d, nz = dz / d, wn = Wx * nx + Wy * ny + Wz * nz;
+  o.x += f * (3 * wn * nx - Wx); o.y += f * (3 * wn * ny - Wy); o.z += f * (3 * wn * nz - Wz);
+}
+function vel(x, y, z, t, withSmall, o) {
+  const r2 = y * y + z * z, r = Math.sqrt(r2);
+  o.x = ub(r); o.y = 0; o.z = 0;
+  turb(x, y, z, t, o);
+  for (let k = 0; k < bigs.length; k++) {
+    const b = bigs[k];
+    const dx = wrap(x - b.x), reach = b.len / 2 + 2.2;
+    if (dx > reach || dx < -reach) continue;
+    if (b.wT < 1) addDipole(dx, y - b.y, z - b.z, b.ad, b.wx, b.wy, b.wz, 1 - b.wT, o);
+    if (b.wT > 0) {
+      const A = wakeAmp(b, t), h = 2e-3, rr = Math.max(r, 0.012);
+      const dpr = (psiT(b, dx, rr + h, A) - psiT(b, dx, rr - h, A)) / (2 * h);
+      const dpx = (psiT(b, dx + h, rr, A) - psiT(b, dx - h, rr, A)) / (2 * h);
+      const uxLab = UTB + dpr / rr, ur = -dpx / rr, w = b.wT;
+      o.x += w * (uxLab - ub(r));
+      if (r > 1e-6) { o.y += w * ur * y / r; o.z += w * ur * z / r; }
+    }
+  }
+  if (withSmall) {
+    const ib = binOf(x);
+    for (let q = -1; q <= 1; q++) {
+      const bin = bins[(ib + q + NB) % NB];
+      for (let k = 0; k < bin.length; k++) {
+        const s = bin[k]; const dx = wrap(x - s.x);
+        if (dx > 0.8 || dx < -0.8) continue;
+        addDipole(dx, y - s.y, z - s.z, s.re * s.grow, s.wx, s.wy, s.wz, 1, o);
+      }
+    }
+  }
+}
+function insideGas(x, y, z) {
+  if (y * y + z * z > 0.999) return true;
+  for (let k = 0; k < bigs.length; k++) if (insideBig(bigs[k], x, y, z, 0)) return true;
+  const ib = binOf(x);
+  for (let q = -1; q <= 1; q++) {
+    const bin = bins[(ib + q + NB) % NB];
+    for (let k = 0; k < bin.length; k++) {
+      const s = bin[k], dx = wrap(x - s.x), dy = y - s.y, dz = z - s.z, rr = s.re * s.grow;
+      if (dx * dx + dy * dy + dz * dz < rr * rr) return true;
+    }
+  }
+  return false;
+}
+
+// ---------------- simulation ----------------
+function gasVolume() { let v = 0; for (const s of smalls) v += s.V; for (const b of bigs) v += b.V; return v; }
+function rebuildBins() { for (let i = 0; i < NB; i++) bins[i].length = 0; for (const s of smalls) if (!s.dead) bins[binOf(s.x)].push(s); }
+
+function tryInject(re) {
+  for (let tries = 0; tries < 6; tries++) {
+    const x = rng() * L - HALF, rho = 0.9 * Math.sqrt(rng()) * (1 - re), th = rng() * 6.283;
+    const y = rho * Math.cos(th), z = rho * Math.sin(th);
+    let ok = true;
+    for (const b of bigs) if (insideBig(b, x, y, z, re + 0.05)) { ok = false; break; }
+    if (!ok) continue;
+    const ib = binOf(x);
+    for (let q = -1; q <= 1 && ok; q++) for (const s of bins[(ib + q + NB) % NB]) {
+      const dx = wrap(x - s.x), dy = y - s.y, dz = z - s.z, rs = re + s.re;
+      if (dx * dx + dy * dy + dz * dz < rs * rs) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const s = newSmall(x, y, z, re, 0); smalls.push(s); bins[ib].push(s); return true;
+  }
+  return false;
+}
+
+function reset() {
+  rng = mulberry32(20261122);
+  T = 0; smalls = []; coalCount = 0;
+  for (const b of (bigs || [])) disposeBig(b);
+  bigs = [];
+  history = [];
+  rebuildBins();
+  const target = 0.10 * PIPE_VOL; let v = 0, guard = 0;
+  while (v < target && guard++ < 20000) { const re = 0.115 + 0.03 * (rng() - 0.5); if (tryInject(re)) { v += 4 / 3 * Math.PI * re ** 3; smalls[smalls.length - 1].grow = 1; } }
+}
+
+function mergeInto(A, B) {
+  const V = A.V + B.V, dx = wrap(B.x - A.x);
+  A.x = wrap(A.x + dx * B.V / V); A.y = (A.y * A.V + B.y * B.V) / V; A.z = (A.z * A.V + B.z * B.V) / V;
+  A.vx = (A.vx * A.V + B.vx * B.V) / V; A.vy = (A.vy * A.V + B.vy * B.V) / V; A.vz = (A.vz * A.V + B.vz * B.V) / V;
+  A.V = V; A.re = reOf(V); B.dead = true; coalCount++;
+  if (A.grow !== undefined) A.grow = Math.max(A.grow, B.grow === undefined ? 1 : B.grow);
+}
+
+function promote(s) {
+  const b = { x: s.x, y: s.y, z: s.z, V: s.V, re: s.re, vx: s.vx, vy: s.vy, vz: s.vz, wx: s.wx, wy: s.wy, wz: s.wz, ph: s.ph, wT: 0, shed: 0, dead: false };
+  shapeParams(b); makeBigMeshes(b); bigs.push(b);
+}
+
+function step(dt) {
+  T += dt;
+  const pc = 0.9 * smooth(6, 16, T);
+  const alphaT = 0.10 + 0.20 * smooth(2, 24, T);
+  rebuildBins();
+
+  // --- dispersed bubbles ---
+  for (const s of smalls) {
+    tmp.x = tmp.y = tmp.z = 0;
+    vel(s.x, s.y, s.z, T, false, tmp);
+    const slip = 0.17 + 0.55 * s.re;
+    let vx = tmp.x + slip, vy = tmp.y, vz = tmp.z;
+    const r = Math.hypot(s.y, s.z) + 1e-9;
+    const target = s.re < 0.13 ? 0.8 : 0.2;          // lift-force reversal with bubble size
+    const vr = 0.3 * (target - r);
+    let wy = vr * s.y / r, wz = vr * s.z / r;
+    // entrainment into the wake of larger bubbles ahead
+    for (const B of bigs) {
+      const dxT = wrap((B.x - B.len / 2) - s.x);
+      if (dxT > -0.05 && dxT < 3 * B.a + 0.8) {
+        const rho = Math.hypot(s.y - B.y, s.z - B.z), Rw = 1.5 * B.a;
+        if (rho < Rw) {
+          const w = (1 - 0.92 * B.wT) * Math.exp(-Math.max(dxT, 0) / (1.1 * B.a)) * (1 - rho / Rw);
+          vx += w * (B.vx + 0.35 - vx);
+          wy += w * 1.2 * (B.y - s.y); wz += w * 1.2 * (B.z - s.z);
+        }
+      }
+    }
+    vy += wy; vz += wz;
+    s.wx = slip; s.wy = wy; s.wz = wz;
+    s.vx = vx; s.vy = vy; s.vz = vz;
+    s.x = wrap(s.x + vx * dt); s.y += vy * dt; s.z += vz * dt;
+    const rn = Math.hypot(s.y, s.z), rmax = 0.985 - s.re;
+    if (rn > rmax) { s.y *= rmax / rn; s.z *= rmax / rn; }
+    if (s.grow < 1) s.grow = Math.min(1, s.grow + dt * 2.5);
+  }
+
+  // --- large bubbles ---
+  for (const B of bigs) {
+    const rc = Math.hypot(B.y, B.z);
+    tmp.x = tmp.y = tmp.z = 0; turb(B.x, B.y * 0.5, B.z * 0.5, T, tmp);
+    const ul = ub(rc) + tmp.x * 0.5;
+    let vxCap = ul + 0.26 + 0.42 * Math.min(B.re, 0.7);
+    for (const A of bigs) {
+      if (A === B || B.wT > 0.5 && A.wT > 0.5) continue;
+      const dxT = wrap((A.x - A.len / 2) - (B.x + B.len / 2));
+      if (dxT > -0.2 && dxT < 3 * A.a + 1.0) {
+        const w = Math.exp(-Math.max(dxT, 0) / (1.3 * A.a)) * (1 - 0.5 * A.wT);
+        vxCap += w * Math.max(0, A.vx + 0.35 - vxCap);
+      }
+    }
+    // a trailing Taylor bubble speeds up in the wake of the one ahead when the liquid slug between them is short
+    let tbBoost = 0;
+    if (B.wT > 0.5) for (const A of bigs) {
+      if (A === B || A.wT < 0.5) continue;
+      const gap = wrap((A.x - A.len / 2) - (B.x + B.len / 2));
+      if (gap > -0.2 && gap < 6) tbBoost = Math.max(tbBoost, 0.9 * Math.exp(-Math.max(gap, 0) / 1.6));
+    }
+    const vx = (1 - B.wT) * vxCap + B.wT * (UTB + tbBoost);
+    const kr = 0.35 + 1.6 * B.lam;
+    const vy = -kr * B.y + tmp.y * 0.6 * (1 - B.lam), vz = -kr * B.z + tmp.z * 0.6 * (1 - B.lam);
+    B.wx = vx - ul; B.wy = vy; B.wz = vz; B.vx = vx; B.vy = vy; B.vz = vz;
+    B.x = wrap(B.x + vx * dt); B.y += vy * dt; B.z += vz * dt;
+    const rmax = Math.max(0, 0.96 - B.a), rn = Math.hypot(B.y, B.z);
+    if (rn > rmax) { const f = rn > 0 ? rmax / rn : 0; B.y *= f; B.z *= f; }
+    const isTB = B.a >= 0.79 && B.body > 0.2;
+    B.wT = clamp(B.wT + (isTB ? 1 : -1) * dt * 0.7, 0, 1);
+    if (B.wT > 0) { B.y *= (1 - dt * 2 * B.wT); B.z *= (1 - dt * 2 * B.wT); }
+  }
+
+  // --- small–small coalescence (or elastic push-apart) ---
+  rebuildBins();
+  for (let i = 0; i < NB; i++) {
+    const A = bins[i], Bn = bins[(i + 1) % NB];
+    for (let p = 0; p < A.length; p++) {
+      const s = A[p]; if (s.dead) continue;
+      for (let pass = 0; pass < 2; pass++) {
+        const list = pass === 0 ? A : Bn, q0 = pass === 0 ? p + 1 : 0;
+        for (let q = q0; q < list.length; q++) {
+          const u = list[q]; if (u.dead || u === s) continue;
+          const dx = wrap(u.x - s.x), dy = u.y - s.y, dz = u.z - s.z, rs = (s.re + u.re) * 0.95, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= rs * rs) continue;
+          if (rng() < pc * dt * 5) { if (s.V >= u.V) mergeInto(s, u); else { mergeInto(u, s); break; } }
+          else { const d = Math.sqrt(d2) + 1e-6, push = 0.5 * (rs - d) / d; s.x = wrap(s.x - dx * push); s.y -= dy * push; s.z -= dz * push; u.x = wrap(u.x + dx * push); u.y += dy * push; u.z += dz * push; }
+        }
+        if (s.dead) break;
+      }
+    }
+  }
+  // --- small absorbed by large ---
+  for (const s of smalls) {
+    if (s.dead) continue;
+    for (const B of bigs) if (insideBig(B, s.x, s.y, s.z, s.re * 0.8)) { mergeInto(B, s); break; }
+  }
+  // --- large–large coalescence ---
+  for (let i = 0; i < bigs.length; i++) for (let j = i + 1; j < bigs.length; j++) {
+    const A = bigs[i], B = bigs[j]; if (A.dead || B.dead) continue;
+    const dx = Math.abs(wrap(B.x - A.x)), rho = Math.hypot(B.y - A.y, B.z - A.z);
+    if (dx < (A.len + B.len) * 0.5 * 0.9 && rho < (A.a + B.a) * 0.8) { if (A.V >= B.V) mergeInto(A, B); else mergeInto(B, A); }
+  }
+  for (const B of bigs) if (B.dead) disposeBig(B);
+  bigs = bigs.filter(b => !b.dead);
+  // --- promotion of grown dispersed bubbles ---
+  const keep = [];
+  for (const s of smalls) { if (s.dead) continue; if (s.re >= BIG_RE) promote(s); else keep.push(s); }
+  smalls = keep;
+  rebuildBins();
+
+  // --- tail shedding from Taylor bubbles ---
+  for (const B of bigs) {
+    if (B.wT < 0.6) continue;
+    B.shed += dt * 2.6 * B.wT;
+    while (B.shed >= 1) {
+      B.shed -= 1;
+      const re = 0.07 + 0.05 * rng(), Vs = 4 / 3 * Math.PI * re ** 3;
+      if (B.V - Vs < 1.5) break;
+      const rho = 0.5 + 0.35 * rng(), th = rng() * 6.283;
+      const s = newSmall(wrap(B.x - B.len / 2 - 0.12 - 0.25 * rng()), rho * Math.cos(th), rho * Math.sin(th), re, 0.5);
+      s.vx = 0.4; smalls.push(s); B.V -= Vs; B.re = reOf(B.V);
+    }
+  }
+  // --- gas injection toward the target void fraction ---
+  let alpha = gasVolume() / PIPE_VOL, n = 0;
+  while (alpha < alphaT && n < 4) { const re = 0.115 + 0.03 * (rng() - 0.5); if (!tryInject(re)) break; alpha += (4 / 3 * Math.PI * re ** 3) / PIPE_VOL; n++; }
+  for (const B of bigs) if (Math.abs(B.V - B.shapeV) > 0.004 * B.V) shapeParams(B);
+}
+
+function regime() {
+  let dmax = 0; for (const s of smalls) dmax = Math.max(dmax, s.re); for (const b of bigs) dmax = Math.max(dmax, b.re);
+  const tb = bigs.filter(b => b.wT > 0.5).length;
+  if (tb > 0) return { id: 2, label: 'Slug flow', hint: tb + ' Taylor bubble' + (tb > 1 ? 's' : '') + ' with aerated liquid slugs', dmax };
+  if (dmax >= 0.3) return { id: 1, label: 'Cap bubbles · transition', hint: 'Coalesced cap bubbles migrate to the core', dmax };
+  if (coalCount > 8) return { id: 0.5, label: 'Bubbly · coalescing', hint: 'Bubbles cluster in each other’s wakes', dmax };
+  return { id: 0, label: 'Bubbly flow', hint: 'Small bubbles, wall-peaked', dmax };
+}
+
+// ---------------- rendering ----------------
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: CAPTURE });
+renderer.setPixelRatio(CAPTURE ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.localClippingEnabled = true;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x06090f);
+const camera = new THREE.PerspectiveCamera(26, 1, 0.1, 200);
+
+// environment for interface reflections: painted equirectangular studio
+{
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 256);
+  gr.addColorStop(0, '#9fb3cc'); gr.addColorStop(0.45, '#3a4658'); gr.addColorStop(0.55, '#161c26'); gr.addColorStop(1, '#05070b');
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 256);
+  const soft = (x, y, w, h, a) => { const rg = g.createRadialGradient(x, y, 0, x, y, Math.max(w, h)); rg.addColorStop(0, `rgba(255,255,255,${a})`); rg.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = rg; g.fillRect(x - w * 1.5, y - h * 1.5, w * 3, h * 3); };
+  soft(130, 40, 70, 22, 1); soft(330, 60, 40, 30, 0.8); soft(450, 120, 30, 40, 0.5);
+  const tex = new THREE.CanvasTexture(c); tex.mapping = THREE.EquirectangularReflectionMapping; tex.encoding = THREE.sRGBEncoding;
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromEquirectangular(tex).texture;
+  tex.dispose(); pm.dispose();
+}
+scene.add(new THREE.AmbientLight(0x8899bb, 0.25));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(4, 9, 7); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fc4ff, 0.8); rim.position.set(-6, -3, -8); scene.add(rim);
+
+const clip = [new THREE.Plane(new THREE.Vector3(1, 0, 0), HALF), new THREE.Plane(new THREE.Vector3(-1, 0, 0), HALF)];
+const bubbleMat = new THREE.MeshPhysicalMaterial({ color: 0xdfe7f1, metalness: 0.15, roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.25, clippingPlanes: clip });
+
+// root group: world x = pipe axis
+const root = new THREE.Group(); scene.add(root);
+
+// pipe wall: fresnel glass
+const pipeMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix*vec4(position,1.0); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }',
+  fragmentShader: 'varying vec3 vN; varying vec3 vV; void main(){ float f = 1.0-abs(dot(normalize(vN),normalize(vV))); float a = 0.025 + 0.42*pow(f,3.0); gl_FragColor = vec4(vec3(0.55,0.72,0.95)*1.2, a); }'
+});
+const pipeGeo = new THREE.CylinderGeometry(1.0, 1.0, L, 96, 1, true); pipeGeo.rotateZ(Math.PI / 2);
+const pipe = new THREE.Mesh(pipeGeo, pipeMat); pipe.renderOrder = 3; root.add(pipe);
+const ringGroup = new THREE.Group(); root.add(ringGroup);
+{
+  const pts = []; for (let i = 0; i <= 96; i++) { const th = i / 96 * Math.PI * 2; pts.push(new THREE.Vector3(0, Math.cos(th), Math.sin(th))); }
+  const rg = new THREE.BufferGeometry().setFromPoints(pts);
+  for (let k = 0; k <= 10; k++) {
+    const end = k === 0 || k === 10;
+    const m = new THREE.Line(rg, new THREE.LineBasicMaterial({ color: 0x9cc0ea, transparent: true, opacity: end ? 0.55 : 0.1, toneMapped: false }));
+    m.position.x = -HALF + k * 2; ringGroup.add(m);
+  }
+}
+
+// dispersed bubbles: instanced ellipsoids
+const MAXS = 2200;
+const sGeo = new THREE.SphereGeometry(1, 22, 14);
+const sMesh = new THREE.InstancedMesh(sGeo, bubbleMat, MAXS); sMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); sMesh.frustumCulled = false; root.add(sMesh);
+const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
+
+// large bubbles: individual surfaces of revolution
+const NU = 84, NT = 44;
+const bigIndex = (() => { const idx = []; for (let i = 0; i < NU - 1; i++) for (let j = 0; j < NT; j++) { const a = i * NT + j, b = i * NT + (j + 1) % NT, c = (i + 1) * NT + j, d = (i + 1) * NT + (j + 1) % NT; idx.push(a, c, b, b, c, d); } return idx; })();
+function makeBigMeshes(b) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(NU * NT * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(NU * NT * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setIndex(bigIndex);
+  const m1 = new THREE.Mesh(geo, bubbleMat), m2 = new THREE.Mesh(geo, bubbleMat);
+  m1.frustumCulled = m2.frustumCulled = false;
+  root.add(m1); root.add(m2); b.geo = geo; b.m1 = m1; b.m2 = m2;
+}
+function disposeBig(b) { if (!b.geo) return; root.remove(b.m1); root.remove(b.m2); b.geo.dispose(); b.geo = null; }
+function updateBigGeo(b, t) {
+  const pos = b.geo.attributes.position.array, len = b.len, wT = b.wT;
+  const wob = (1 - wT) * 0.06 * (1 - b.lam * 0.5);
+  for (let i = 0; i < NU; i++) {
+    const u = i / (NU - 1), d = len * (1 - Math.cos(Math.PI * u)) / 2;
+    let h = hProf(b, d);
+    if (wT > 0 && d > b.t && d < len - b.n * 0.6) h += wT * 0.012 * Math.sin(10 * d - 9 * t + b.ph) * smooth(b.t, b.t + 0.4, d);
+    const tailZone = 1 - smooth(0, b.t + 0.35, d);
+    const ax = (d - len / 2) * (1 + wob * Math.sin(4.1 * t + b.ph));
+    for (let j = 0; j < NT; j++) {
+      const th = j / NT * Math.PI * 2;
+      const hh = h * (1 + wob * 0.6 * Math.sin(2 * th + 5.3 * t + b.ph) + wT * 0.07 * tailZone * Math.sin(3 * th + 6.5 * t + b.ph));
+      const k = (i * NT + j) * 3;
+      pos[k] = ax; pos[k + 1] = hh * Math.cos(th); pos[k + 2] = hh * Math.sin(th);
+    }
+  }
+  b.geo.attributes.position.needsUpdate = true;
+  b.geo.computeVertexNormals();
+}
+
+// coolwarm colormap (Moreland)
+const CM = [[59, 76, 192], [124, 159, 249], [192, 212, 245], [242, 203, 183], [238, 132, 104], [180, 4, 38]];
+function cmap(v, out) {
+  const f = clamp(v, 0, 1) * (CM.length - 1), i = Math.min(CM.length - 2, f | 0), w = f - i;
+  out[0] = CM[i][0] + (CM[i + 1][0] - CM[i][0]) * w; out[1] = CM[i][1] + (CM[i + 1][1] - CM[i][1]) * w; out[2] = CM[i][2] + (CM[i + 1][2] - CM[i][2]) * w;
+  return out;
+}
+const VMAX = 2.0;
+{
+  const c = document.getElementById('cbar'), g = c.getContext('2d'), o = [0, 0, 0];
+  for (let x = 0; x < c.width; x++) { cmap(x / (c.width - 1), o); g.fillStyle = `rgb(${o[0] | 0},${o[1] | 0},${o[2] | 0})`; g.fillRect(x, 0, 1, c.height); }
+}
+
+// streamlines
+const NSEED = 168, NST = 34, DS = 0.075, SEGS = 2 * NST;
+const seeds = [];
+{
+  const sr = mulberry32(5);
+  for (let i = 0; i < NSEED; i++) {
+    const x = sr() * L - HALF;
+    let y, z;
+    if (i % 5 < 3) { y = (sr() * 2 - 1) * 0.95; z = (sr() * 2 - 1) * 0.3; if (y * y + z * z > 0.9) { y *= 0.9; } }
+    else { const rho = 0.95 * Math.sqrt(sr()), th = sr() * 6.283; y = rho * Math.cos(th); z = rho * Math.sin(th); }
+    seeds.push([x, y, z]);
+  }
+}
+const lPos = new Float32Array(NSEED * SEGS * 6), lCol = new Float32Array(NSEED * SEGS * 6);
+const lGeo = new THREE.BufferGeometry();
+lGeo.setAttribute('position', new THREE.BufferAttribute(lPos, 3).setUsage(THREE.DynamicDrawUsage));
+lGeo.setAttribute('color', new THREE.BufferAttribute(lCol, 3).setUsage(THREE.DynamicDrawUsage));
+const lines = new THREE.LineSegments(lGeo, new THREE.LineBasicMaterial({ vertexColors: true, toneMapped: false }));
+lines.frustumCulled = false; lines.renderOrder = 1; root.add(lines);
+const lin = (c) => Math.pow(c / 255, 2.2);
+const cc = [0, 0, 0], v1 = { x: 0, y: 0, z: 0 }, v2 = { x: 0, y: 0, z: 0 };
+function velF(x, y, z, o) { vel(x, y, z, T, true, o); o.x -= frameU; }
+function traceSeed(i) {
+  let off = i * SEGS * 6, k = 0;
+  const sd = seeds[i];
+  const write = (ax, ay, az, bx, by, bz, sa, sb, fa, fb) => {
+    lPos[off] = ax; lPos[off + 1] = ay; lPos[off + 2] = az; lPos[off + 3] = bx; lPos[off + 4] = by; lPos[off + 5] = bz;
+    cmap(sa / VMAX, cc); lCol[off] = lin(cc[0]) * fa; lCol[off + 1] = lin(cc[1]) * fa; lCol[off + 2] = lin(cc[2]) * fa;
+    cmap(sb / VMAX, cc); lCol[off + 3] = lin(cc[0]) * fb; lCol[off + 4] = lin(cc[1]) * fb; lCol[off + 5] = lin(cc[2]) * fb;
+    off += 6; k++;
+  };
+  if (!insideGas(sd[0], sd[1], sd[2])) {
+    for (let dir = -1; dir <= 1; dir += 2) {
+      let x = sd[0], y = sd[1], z = sd[2];
+      velF(x, y, z, v1); let sp = Math.hypot(v1.x, v1.y, v1.z);
+      for (let n = 0; n < NST; n++) {
+        if (sp < 1e-4) break;
+        const h = dir * DS / sp;
+        const mx = x + 0.5 * h * v1.x, my = y + 0.5 * h * v1.y, mz = z + 0.5 * h * v1.z;
+        velF(mx, my, mz, v2); const sp2 = Math.hypot(v2.x, v2.y, v2.z); if (sp2 < 1e-4) break;
+        const h2 = dir * DS / sp2;
+        let nx = x + h2 * v2.x, ny = y + h2 * v2.y, nz = z + h2 * v2.z;
+        const rn = Math.hypot(ny, nz); if (rn > 0.985) { ny *= 0.985 / rn; nz *= 0.985 / rn; }
+        if (insideGas(nx, ny, nz)) break;
+        velF(nx, ny, nz, v1); const spn = Math.hypot(v1.x, v1.y, v1.z);
+        const fa = Math.min(1, (NST - n) / 10), fb = Math.min(1, (NST - n - 1) / 10);
+        let wx = nx; if (wx > HALF) wx -= L; else if (wx < -HALF) wx += L;
+        if (wx === nx) write(x, y, z, nx, ny, nz, sp, spn, fa, fb);
+        x = wx; y = ny; z = nz; sp = spn;
+      }
+    }
+  }
+  while (k < SEGS) { lPos.fill(0, off, off + 6); lCol.fill(0, off, off + 6); off += 6; k++; }
+}
+
+// mid-plane velocity slice
+const SX = 256, SY = 32, sData = new Uint8Array(SX * SY * 4);
+const sTex = new THREE.DataTexture(sData, SX, SY, THREE.RGBAFormat);
+sTex.magFilter = THREE.LinearFilter; sTex.minFilter = THREE.LinearFilter; sTex.encoding = THREE.sRGBEncoding;
+const slice = new THREE.Mesh(new THREE.PlaneGeometry(L, 2), new THREE.MeshBasicMaterial({ map: sTex, transparent: true, side: THREE.DoubleSide, depthWrite: false, toneMapped: false, opacity: 0.8 }));
+slice.renderOrder = 2; root.add(slice);
+function sliceRows(j0, j1) {
+  for (let j = j0; j < j1; j++) {
+    const y = -1 + (j + 0.5) / SY * 2;
+    for (let i = 0; i < SX; i++) {
+      const x = -HALF + (i + 0.5) / SX * L, k = (j * SX + i) * 4;
+      if (Math.abs(y) > 0.99 || insideGas(x, y, 0)) { sData[k + 3] = 0; continue; }
+      velF(x, y, 0, v1);
+      cmap(Math.hypot(v1.x, v1.y, v1.z) / VMAX, cc);
+      sData[k] = cc[0] * 0.62; sData[k + 1] = cc[1] * 0.62; sData[k + 2] = cc[2] * 0.62; sData[k + 3] = 235;
+    }
+  }
+  sTex.needsUpdate = true;
+}
+
+// camera / orientation
+let controls = null, portrait = null;
+function setupView() {
+  const w = stage.clientWidth || window.innerWidth, h = stage.clientHeight || window.innerHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h;
+  const p = w / h < 0.9;
+  if (p !== portrait) {
+    portrait = p;
+    if (controls) controls.dispose();
+    if (p) { camera.up.set(1, 0, 0); camera.position.set(-1.5, 5.5, 46); }
+    else { camera.up.set(0, 1, 0); camera.position.set(-1.8, 6.6, 26.5); }
+    camera.lookAt(0, -0.6, 0);
+    if (THREE.OrbitControls) {
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, portrait ? 0 : -0.6, 0); controls.enableDamping = true; controls.dampingFactor = 0.08; controls.minDistance = 4; controls.maxDistance = 80;
+      controls.autoRotate = orbit; controls.autoRotateSpeed = 0.6;
+    }
+    document.getElementById('gArrow').textContent = p ? 'g ↓' : 'g ←';
+    document.getElementById('gText').textContent = p ? 'Vertical pipe, flow is upward (↑)' : 'Pipe drawn horizontal; flow is upward (→)';
+  }
+  if (p) { const fit = 1.15 * HALF / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)); if (!controls || camera.position.length() < fit * 0.6) camera.position.setLength(fit); }
+  camera.updateProjectionMatrix();
+}
+
+// ---------------- HUD ----------------
+const el = (id) => document.getElementById(id);
+const tl = el('tl'), tlg = tl.getContext('2d');
+const RC = { 0: '#6aa7ff', 0.5: '#8f9cf0', 1: '#f2b45a', 2: '#ff7a5c' };
+el('tEnd').textContent = (TEND / 2).toFixed(1);
+function drawTimeline() {
+  const w = tl.width, h = tl.height;
+  tlg.clearRect(0, 0, w, h); tlg.fillStyle = 'rgba(140,170,210,0.12)'; tlg.fillRect(0, 0, w, h);
+  for (const e of history) { tlg.fillStyle = RC[e.id]; tlg.fillRect(e.t0 / TEND * w, 2, Math.max(1, (e.t1 - e.t0) / TEND * w + 0.5), h - 4); }
+  tlg.fillStyle = '#e4ebf4'; tlg.fillRect(Math.min(w - 2, T / TEND * w), 0, 2, h);
+}
+function updateHUD() {
+  const rg = regime(), alpha = gasVolume() / PIPE_VOL;
+  el('sT').textContent = (T / 2).toFixed(1);
+  el('sA').textContent = alpha.toFixed(3);
+  el('sN').textContent = String(smalls.length + bigs.length);
+  el('sD').textContent = rg.dmax.toFixed(2);
+  el('sC').textContent = String(coalCount);
+  el('tNow').textContent = (T / 2).toFixed(1);
+  const chip = el('chip'); chip.textContent = rg.label; chip.style.color = RC[rg.id];
+  el('hint').textContent = rg.hint;
+  const last = history[history.length - 1];
+  if (last && last.id === rg.id) last.t1 = T; else history.push({ id: rg.id, t0: last ? last.t1 : 0, t1: T });
+  drawTimeline();
+  return rg;
+}
+
+// ---------------- frame ----------------
+let frameNo = 0;
+function renderFrame(t) {
+  // dispersed bubbles
+  let n = 0;
+  for (const s of smalls) {
+    if (n >= MAXS) break;
+    const chi = 1 + 1.1 * s.re + 0.07 * Math.sin(9 * t + s.ph), g = s.re * s.grow;
+    _p.set(s.x, s.y, s.z); _s.set(g / Math.pow(chi, 2 / 3), g * Math.cbrt(chi), g * Math.cbrt(chi) * (1 + 0.04 * Math.sin(7 * t + s.ph * 2)));
+    _q.setFromAxisAngle(_axis, s.ph);
+    _m.compose(_p, _q, _s); sMesh.setMatrixAt(n++, _m);
+  }
+  sMesh.count = n; sMesh.instanceMatrix.needsUpdate = true;
+  for (const b of bigs) {
+    updateBigGeo(b, t);
+    b.m1.position.set(b.x, b.y, b.z);
+    const over = b.x + b.len / 2 > HALF ? -L : (b.x - b.len / 2 < -HALF ? L : 0);
+    b.m2.visible = over !== 0; b.m2.position.set(b.x + over, b.y, b.z);
+  }
+  if (showLines) { const g = frameNo % 3; for (let i = g; i < NSEED; i += 3) traceSeed(i); lGeo.attributes.position.needsUpdate = true; lGeo.attributes.color.needsUpdate = true; }
+  if (showSlice) { const g = frameNo % 4, r = SY / 4; sliceRows(g * r, (g + 1) * r); }
+  frameNo++;
+  if (controls) controls.update();
+  renderer.render(scene, camera);
+}
+const _axis = new THREE.Vector3(1, 0, 0);
+
+// ---------------- controls ----------------
+let playing = true, speed = 1, showLines = true, showSlice = true, orbit = false;
+const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+function press(group, btn) { for (const b of group) b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); }
+const bPlay = el('bPlay');
+function setPlaying(p) { playing = p; bPlay.textContent = p ? 'Pause' : 'Play'; }
+bPlay.addEventListener('click', () => setPlaying(!playing));
+el('bRestart').addEventListener('click', () => { reset(); setPlaying(true); });
+const spB = [el('sp05'), el('sp1'), el('sp2')];
+spB.forEach(b => b.addEventListener('click', () => { speed = +b.dataset.speed; press(spB, b); }));
+const frB = [el('frLab'), el('frMix'), el('frTB')];
+const frNames = { '0': 'Laboratory', '1': 'Mixture, U<sub>m</sub>', '1.6': 'Taylor bubble, U<sub>TB</sub>' };
+frB.forEach(b => b.addEventListener('click', () => { frameU = +b.dataset.frame; press(frB, b); el('frameName').innerHTML = frNames[b.dataset.frame]; for (let i = 0; i < NSEED; i++) traceSeed(i); sliceRows(0, SY); }));
+const tog = (id, fn) => { const b = el(id); b.addEventListener('click', () => { const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', on ? 'true' : 'false'); fn(on); }); };
+tog('tgLines', on => { showLines = on; lines.visible = on; });
+tog('tgSlice', on => { showSlice = on; slice.visible = on; });
+tog('tgPipe', on => { pipe.visible = on; ringGroup.visible = on; });
+tog('tgOrbit', on => { orbit = on; if (controls) controls.autoRotate = on; });
+window.addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); setPlaying(!playing); } });
+
+// ---------------- boot ----------------
+reset();
+setupView();
+window.addEventListener('resize', setupView);
+for (let i = 0; i < NSEED; i++) traceSeed(i); sliceRows(0, SY);
+updateHUD();
+const DT = 1 / 60;
+const fade = el('fade');
+let restarting = false;
+function advance(simDt) {
+  let acc = simDt;
+  while (acc > 1e-9) { const h = Math.min(DT, acc); step(h); acc -= h; }
+}
+
+if (CAPTURE) {
+  window.__cap = {
+    advance: (sec) => advance(sec),
+    frame: () => { if (T >= TEND) reset(); renderFrame(T); updateHUD(); },
+    full: () => { for (let i = 0; i < NSEED; i++) traceSeed(i); sliceRows(0, SY); renderFrame(T); updateHUD(); },
+    scene, mat: bubbleMat,
+    get T() { return T; }, stats: () => ({ T, n: smalls.length, big: bigs.length, tb: bigs.filter(b => b.wT > 0.5).length, alpha: gasVolume() / PIPE_VOL, reg: regime().label, re: bigs.map(b => +b.re.toFixed(2)) })
+  };
+  window.__ready = true;
+} else {
+  if (reduce) setPlaying(false);
+  let last = performance.now(), hudTick = 0;
+  function loop(now) {
+    const real = Math.min(0.05, (now - last) / 1000); last = now;
+    if (playing && !restarting) {
+      advance(real * speed);
+      if (T >= TEND) {
+        restarting = true; fade.classList.add('on');
+        setTimeout(() => { reset(); fade.classList.remove('on'); restarting = false; }, 550);
+      }
+    }
+    renderFrame(T);
+    if (++hudTick % 8 === 0) updateHUD();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+})();
+</script>
