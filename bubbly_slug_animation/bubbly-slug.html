@@ -172,9 +172,18 @@ details p { margin: 6px 0 0; line-height: 1.5; }
 (() => {
 'use strict';
 const CAPTURE = /[?&]capture/.test(location.search);
+// flow-condition presets (used for the experiment-comparison renders; the default is the full transition run)
+const CASE = CAPTURE ? (location.search.match(/case=(\d)/) || [])[1] : undefined;
+const P = { L: 20, chi: 0, a0: 0.10, a1: 0.30, aT0: 2, aT1: 24, pc: 0.9, pcT0: 6, pcT1: 16, re0: 0.115, reSp: 0.03, churn: 0, shed: 2.6, turb: 1, seedTB: 0, seedCaps: 0 };
+Object.assign(P, ({
+  '1': { L: 8, chi: 1.75, a0: 0.045, a1: 0.045, pc: 0.06, pcT0: 0, pcT1: 1, re0: 0.08, reSp: 0.035, seedCaps: 2 },
+  '2': { L: 8, chi: 1.8, a0: 0.13, a1: 0.13, pc: 0.04, pcT0: 0, pcT1: 1, re0: 0.07, reSp: 0.03, turb: 1.3 },
+  '3': { L: 12, chi: 1.8, a0: 0.15, a1: 0.30, aT0: 1, aT1: 14, pc: 0.9, pcT0: 2, pcT1: 8, re0: 0.075, reSp: 0.03, turb: 1.5 },
+  '4': { L: 12, chi: 1.6, a0: 0.42, a1: 0.42, pc: 0.9, pcT0: 0, pcT1: 1, re0: 0.08, reSp: 0.04, seedTB: 1, churn: 1.5, shed: 14, turb: 2.4 }
+})[CASE] || {});
 
 // ---------------- constants (lengths in R, velocity in U_m) ----------------
-const L = 20, HALF = L / 2, UM = 1, UMAX = UM * 60 / 49, UTB = 1.6, EPS = 0.06;
+const L = P.L, HALF = L / 2, UM = 1, UMAX = UM * 60 / 49, UTB = 1.6, EPS = 0.06;
 const TEND = 56;           // loop length, simulation seconds (t·Um/D = 28)
 const BIG_RE = 0.2;        // equivalent radius above which a bubble gets its own mesh
 const PIPE_VOL = Math.PI * L;
@@ -212,15 +221,16 @@ function turb(x, y, z, t, o) {
   const w = 1 - r2, damp = w * w, gy = -4 * w * y, gz = -4 * w * z;
   for (let i = 0; i < modes.length; i++) {
     const m = modes[i], th = m.kx * x + m.ky * y + m.kz * z + m.om * t + m.ph, c = Math.cos(th), s = Math.sin(th);
-    o.x += m.amp * (damp * c * m.cx + (gy * m.ez - gz * m.ey) * s);
-    o.y += m.amp * (damp * c * m.cy + gz * m.ex * s);
-    o.z += m.amp * (damp * c * m.cz - gy * m.ex * s);
+    const am = m.amp * P.turb;
+    o.x += am * (damp * c * m.cx + (gy * m.ez - gz * m.ey) * s);
+    o.y += am * (damp * c * m.cy + gz * m.ex * s);
+    o.z += am * (damp * c * m.cz - gy * m.ex * s);
   }
 }
 
 // ---------------- bubble state ----------------
 let rng, T, smalls, bigs, coalCount, frameU = UTB, history;
-const NB = 50, BW = L / NB; let bins = [];
+const NB = Math.floor(L / 0.42), BW = L / NB; let bins = [];
 for (let i = 0; i < NB; i++) bins.push([]);
 const binOf = (x) => clamp(Math.floor((x + HALF) / BW), 0, NB - 1);
 
@@ -364,8 +374,20 @@ function reset() {
   bigs = [];
   history = [];
   rebuildBins();
-  const target = 0.10 * PIPE_VOL; let v = 0, guard = 0;
-  while (v < target && guard++ < 20000) { const re = 0.115 + 0.03 * (rng() - 0.5); if (tryInject(re)) { v += 4 / 3 * Math.PI * re ** 3; smalls[smalls.length - 1].grow = 1; } }
+  let v = 0, guard = 0;
+  const total = P.a0 * PIPE_VOL;
+  for (let k = 0; k < P.seedTB; k++) {
+    const V = 0.6 * total / P.seedTB;
+    const b = { x: -HALF + (k + 0.5) * L / P.seedTB, y: 0, z: 0, V, re: reOf(V), vx: UTB, vy: 0, vz: 0, wx: 0, wy: 0, wz: 0, ph: rng() * 6.283, wT: 1, shed: 0, dead: false };
+    shapeParams(b); makeBigMeshes(b); bigs.push(b); v += V;
+  }
+  for (let k = 0; k < P.seedCaps; k++) {
+    const re = 0.24 + 0.1 * rng(), V = 4 / 3 * Math.PI * re ** 3, th = rng() * 6.283, rho = 0.3 * rng();
+    const b = { x: rng() * L - HALF, y: rho * Math.cos(th), z: rho * Math.sin(th), V, re, vx: 1.4, vy: 0, vz: 0, wx: 0.4, wy: 0, wz: 0, ph: rng() * 6.283, wT: 0, shed: 0, dead: false };
+    shapeParams(b); makeBigMeshes(b); bigs.push(b); v += V;
+  }
+  const target = total;
+  while (v < target && guard++ < 40000) { const re = P.re0 + P.reSp * (rng() - 0.5); if (tryInject(re)) { v += 4 / 3 * Math.PI * re ** 3; smalls[smalls.length - 1].grow = 1; } }
 }
 
 function mergeInto(A, B) {
@@ -383,8 +405,8 @@ function promote(s) {
 
 function step(dt) {
   T += dt;
-  const pc = 0.9 * smooth(6, 16, T);
-  const alphaT = 0.10 + 0.20 * smooth(2, 24, T);
+  const pc = P.pc * smooth(P.pcT0, P.pcT1, T);
+  const alphaT = P.a0 + (P.a1 - P.a0) * smooth(P.aT0, P.aT1, T);
   rebuildBins();
 
   // --- dispersed bubbles ---
@@ -492,10 +514,10 @@ function step(dt) {
   // --- tail shedding from Taylor bubbles ---
   for (const B of bigs) {
     if (B.wT < 0.6) continue;
-    B.shed += dt * 2.6 * B.wT;
+    B.shed += dt * P.shed * B.wT;
     while (B.shed >= 1) {
       B.shed -= 1;
-      const re = 0.07 + 0.05 * rng(), Vs = 4 / 3 * Math.PI * re ** 3;
+      const re = (P.re0 < 0.1 ? P.re0 * (0.7 + 0.6 * rng()) : 0.07 + 0.05 * rng()), Vs = 4 / 3 * Math.PI * re ** 3;
       if (B.V - Vs < 1.5) break;
       const rho = 0.5 + 0.35 * rng(), th = rng() * 6.283;
       const s = newSmall(wrap(B.x - B.len / 2 - 0.12 - 0.25 * rng()), rho * Math.cos(th), rho * Math.sin(th), re, 0.5);
@@ -504,7 +526,7 @@ function step(dt) {
   }
   // --- gas injection toward the target void fraction ---
   let alpha = gasVolume() / PIPE_VOL, n = 0;
-  while (alpha < alphaT && n < 4) { const re = 0.115 + 0.03 * (rng() - 0.5); if (!tryInject(re)) break; alpha += (4 / 3 * Math.PI * re ** 3) / PIPE_VOL; n++; }
+  while (alpha < alphaT && n < 4) { const re = P.re0 + P.reSp * (rng() - 0.5); if (!tryInject(re)) break; alpha += (4 / 3 * Math.PI * re ** 3) / PIPE_VOL; n++; }
   for (const B of bigs) if (Math.abs(B.V - B.shapeV) > 0.004 * B.V) shapeParams(B);
 }
 
@@ -575,7 +597,7 @@ const ringGroup = new THREE.Group(); root.add(ringGroup);
 }
 
 // dispersed bubbles: instanced ellipsoids
-const MAXS = 2200;
+const MAXS = 8000;
 const sGeo = new THREE.SphereGeometry(1, 22, 14);
 const sMesh = new THREE.InstancedMesh(sGeo, bubbleMat, MAXS); sMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); sMesh.frustumCulled = false; root.add(sMesh);
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
@@ -601,10 +623,15 @@ function updateBigGeo(b, t) {
     let h = hProf(b, d);
     if (wT > 0 && d > b.t && d < len - b.n * 0.6) h += wT * 0.012 * Math.sin(10 * d - 9 * t + b.ph) * smooth(b.t, b.t + 0.4, d);
     const tailZone = 1 - smooth(0, b.t + 0.35, d);
+    if (P.churn > 0 && wT > 0) {   // churn: large-amplitude, chaotic interface, strongest toward the tail
+      const cz = P.churn * wT * b.a * (0.05 + 0.22 * (1 - smooth(0, b.t + 1.6, d)));
+      h = Math.max(0, h + cz * (Math.sin(7.3 * d - 11 * t + b.ph) * 0.6 + Math.sin(13.1 * d + 7 * t) * 0.4) * smooth(0, 0.15, d) * (1 - smooth(len - 0.2, len, d)));
+    }
     const ax = (d - len / 2) * (1 + wob * Math.sin(4.1 * t + b.ph));
     for (let j = 0; j < NT; j++) {
       const th = j / NT * Math.PI * 2;
-      const hh = h * (1 + wob * 0.6 * Math.sin(2 * th + 5.3 * t + b.ph) + wT * 0.07 * tailZone * Math.sin(3 * th + 6.5 * t + b.ph));
+      let hh = h * (1 + wob * 0.6 * Math.sin(2 * th + 5.3 * t + b.ph) + wT * 0.07 * tailZone * Math.sin(3 * th + 6.5 * t + b.ph));
+      if (P.churn > 0) hh *= 1 + P.churn * wT * (0.05 + 0.25 * (1 - smooth(0, b.t + 1.6, d))) * Math.sin(4 * th + 9.1 * d - 8 * t + b.ph) * Math.sin(2.3 * th - 5 * d + 6 * t);
       const k = (i * NT + j) * 3;
       pos[k] = ax; pos[k + 1] = hh * Math.cos(th); pos[k + 2] = hh * Math.sin(th);
     }
@@ -682,7 +709,7 @@ function traceSeed(i) {
 }
 
 // mid-plane velocity slice
-const SX = 256, SY = 32, sData = new Uint8Array(SX * SY * 4);
+const SX = CASE ? 1024 : 256, SY = CASE ? 48 : 32, sData = new Uint8Array(SX * SY * 4);
 const sTex = new THREE.DataTexture(sData, SX, SY, THREE.RGBAFormat);
 sTex.magFilter = THREE.LinearFilter; sTex.minFilter = THREE.LinearFilter; sTex.encoding = THREE.sRGBEncoding;
 const slice = new THREE.Mesh(new THREE.PlaneGeometry(L, 2), new THREE.MeshBasicMaterial({ map: sTex, transparent: true, side: THREE.DoubleSide, depthWrite: false, toneMapped: false, opacity: 0.8 }));
@@ -759,9 +786,9 @@ function renderFrame(t) {
   let n = 0;
   for (const s of smalls) {
     if (n >= MAXS) break;
-    const chi = 1 + 1.1 * s.re + 0.07 * Math.sin(9 * t + s.ph), g = s.re * s.grow;
+    const chi = (P.chi || 1 + 1.1 * s.re) + (P.chi ? 0.22 : 0.07) * Math.sin(9 * t + s.ph), g = s.re * s.grow;
     _p.set(s.x, s.y, s.z); _s.set(g / Math.pow(chi, 2 / 3), g * Math.cbrt(chi), g * Math.cbrt(chi) * (1 + 0.04 * Math.sin(7 * t + s.ph * 2)));
-    _q.setFromAxisAngle(_axis, s.ph);
+    _q.setFromAxisAngle(_axis, s.ph); if (P.chi) { _q2.setFromAxisAngle(_tilt, 0.35 * Math.sin(5 * t + 3 * s.ph)); _q.premultiply(_q2); }
     _m.compose(_p, _q, _s); sMesh.setMatrixAt(n++, _m);
   }
   sMesh.count = n; sMesh.instanceMatrix.needsUpdate = true;
@@ -777,7 +804,7 @@ function renderFrame(t) {
   if (controls) controls.update();
   renderer.render(scene, camera);
 }
-const _axis = new THREE.Vector3(1, 0, 0);
+const _axis = new THREE.Vector3(1, 0, 0), _tilt = new THREE.Vector3(0, 0, 1), _q2 = new THREE.Quaternion();
 
 // ---------------- controls ----------------
 let playing = true, speed = 1, showLines = true, showSlice = true, orbit = false;
@@ -819,6 +846,15 @@ if (CAPTURE) {
     frame: () => { if (T >= TEND) reset(); renderFrame(T); updateHUD(); },
     full: () => { for (let i = 0; i < NSEED; i++) traceSeed(i); sliceRows(0, SY); renderFrame(T); updateHUD(); },
     scene, mat: bubbleMat,
+    view: (hgt, x0) => {   // fixed high-speed-camera window on a vertical pipe
+      if (controls) { controls.dispose(); controls = null; }
+      camera.up.set(1, 0, 0); camera.fov = 8;
+      const dist = (hgt / 2) / Math.tan(THREE.MathUtils.degToRad(4));
+      camera.position.set(x0, 0, dist); camera.lookAt(x0, 0, 0); camera.updateProjectionMatrix();
+      const sr = mulberry32(9);
+      for (let i = 0; i < NSEED; i++) { const x = x0 + (sr() - 0.5) * hgt * 1.15; let y, z; if (i % 5 < 3) { y = (sr() * 2 - 1) * 0.93; z = (sr() * 2 - 1) * 0.3; } else { const rho = 0.93 * Math.sqrt(sr()), th = sr() * 6.283; y = rho * Math.cos(th); z = rho * Math.sin(th); } seeds[i] = [x, y, z]; }
+    },
+    setFrame: (u) => { frameU = u; },
     get T() { return T; }, stats: () => ({ T, n: smalls.length, big: bigs.length, tb: bigs.filter(b => b.wT > 0.5).length, alpha: gasVolume() / PIPE_VOL, reg: regime().label, re: bigs.map(b => +b.re.toFixed(2)) })
   };
   window.__ready = true;
